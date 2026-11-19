@@ -1,3 +1,5 @@
 *.png
 *:Zone.Identifier
 *.DS_Store
+__pycache__/
+data/
