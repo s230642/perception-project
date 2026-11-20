@@ -12,9 +12,9 @@ def detect2D(dataset_path, imagesAreRaw = True):
     """Rectify the dataset first if needed, then run detection on the rectified set of left images."""
 
     if imagesAreRaw:
-        lefts = [left for _, (left, _) in get_rectified_images(dataset_path)]
+        lefts = (left for _, (left, _) in get_rectified_images(dataset_path))
     else: 
-        lefts = [cv2.imread(p) for p in sorted(glob(f"{dataset_path}/left/*.png"))]
+        lefts = (cv2.imread(p) for p in sorted(glob(f"{dataset_path}/left/*.png")))
 
     detect_sequence(lefts)
 
@@ -24,7 +24,7 @@ def detect3D(dataset_path, imagesAreRaw = True):
     if imagesAreRaw:
         RGB_D = (rgbd for _, rgbd in get_depth_images(dataset_path))
     else: 
-        RGB_D = [np.load(p) for p in sorted(glob(f"{dataset_path}/RGB_D/*.npy"))]
+        RGB_D = (np.load(p) for p in sorted(glob(f"{dataset_path}/RGB_D/*.npy")))
 
     detect_sequence3D(RGB_D)
 

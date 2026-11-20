@@ -30,9 +30,10 @@ def detect(frame, background, diff_threshold=100, min_area=100):
     return (x, y, w, h)
 
 def detect_sequence(image_set):
-    background = image_set[0]
+    frames = iter(image_set)
+    background = next(frames)
 
-    for image in image_set[1:]:
+    for image in frames:
         output = image.copy()
         box = detect(image, background, diff_threshold=25, min_area=300)
 
