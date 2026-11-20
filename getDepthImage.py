@@ -7,7 +7,7 @@ import numpy as np
 
 
 def load_calibration(calib_path):
-    """Load the JSON written by calibration.py and build everything that only depends on it.
+    """Load the JSON written by runCalibration.py and build everything that only depends on it.
 
     The rectification maps and the stereo matcher are built here once, so call this once and pass
     the result to compute_depth_image for every pair.
@@ -79,13 +79,13 @@ def compute_depth_image(img_left, img_right, calib):
     return np.dstack([rgb, depth])
 
 
-def get_depth_images(dataset, calib_path="stereo_calibration.json"):
-    """Yield (name, RGBD image) for every pair in dataset/left/*.png and dataset/right/*.png."""
+def get_depth_images(dataset_folder_path, calib_path="stereo_calibration.json"):
+    """Yield (name, RGBD image) for every pair in dataset_folder_path/left/*.png and dataset_folder_path/right/*.png."""
     calib = load_calibration(calib_path)
 
-    images_left = sorted(glob.glob(f"{dataset}/left/*.png"))
-    images_right = sorted(glob.glob(f"{dataset}/right/*.png"))
-    assert images_left, f"No images found in {dataset}/left"
+    images_left = sorted(glob.glob(f"{dataset_folder_path}/left/*.png"))
+    images_right = sorted(glob.glob(f"{dataset_folder_path}/right/*.png"))
+    assert images_left, f"No images found in {dataset_folder_path}/left"
     assert len(images_left) == len(images_right), "left/ and right/ have different numbers of images"
 
     for path_l, path_r in zip(images_left, images_right):
@@ -101,11 +101,11 @@ def depth_to_color(depth, max_depth_mm=5000):
 
 
 if __name__ == "__main__":
-    dataset = "data/0_calib"
+    dataset_folder_path = "data/0_calib"
     out_dir = "output/depth"
     os.makedirs(out_dir, exist_ok=True)
 
-    for name, rgbd in get_depth_images(dataset):
+    for name, rgbd in get_depth_images(dataset_folder_path):
         depth = rgbd[:, :, 3]
         valid = depth > 0
         print(f"{name}: {valid.mean() * 100:.0f}% valid, median depth {np.median(depth[valid]):.0f} mm")
