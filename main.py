@@ -22,7 +22,7 @@ def detect3D(dataset_path, imagesAreRaw = True):
     """Rectify the dataset first if needed, then run 3D detection on the rectified images."""
   
     if imagesAreRaw:
-        _ = RGB_D = get_depth_images(dataset_path)
+        RGB_D = (rgbd for _, rgbd in get_depth_images(dataset_path))
     else: 
         RGB_D = [np.load(p) for p in sorted(glob(f"{dataset_path}/RGB_D/*.npy"))]
 
