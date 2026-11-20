@@ -51,12 +51,10 @@ def load_calibration(calib_path):
         "matcher": matcher,
     }
 
+def compute_rectified_image(img_left, img_right, calib):
+    """Turn one raw (distorted, unrectified) BGR pair into a an undistorted, rectified BGR pair.
 
-def compute_depth_image(img_left, img_right, calib):
-    """Turn one raw (distorted, unrectified) BGR pair into an RGBD image.
-
-    Returns an H x W x 4 float32 array: channels 0-2 are the rectified left image as RGB (0-255),
-    channel 3 is depth in mm. Pixels without a valid disparity have depth 0.
+    Returns a tuple of (left, right).
     """
     h, w = img_left.shape[:2]
     if (w, h) != calib["image_size"] or img_right.shape[:2] != (h, w):
@@ -65,6 +63,20 @@ def compute_depth_image(img_left, img_right, calib):
 
     rect_l = cv2.remap(img_left, *calib["map_l"], cv2.INTER_LINEAR)
     rect_r = cv2.remap(img_right, *calib["map_r"], cv2.INTER_LINEAR)
+
+    return rect_l, rect_r
+
+
+
+
+def compute_depth_image(img_left, img_right, calib):
+    """Turn one raw (distorted, unrectified) BGR pair into an RGBD image.
+
+    Returns an H x W x 4 float32 array: channels 0-2 are the rectified left image as RGB (0-255),
+    channel 3 is depth in mm. Pixels without a valid disparity have depth 0.
+    """
+
+    rect_l, rect_r = compute_rectified_image(img_left, img_right, calib)
 
     # SGBM returns fixed-point disparity scaled by 16
     disparity = calib["matcher"].compute(rect_l, rect_r).astype(np.float32) / 16.0
@@ -91,6 +103,18 @@ def get_depth_images(dataset_folder_path, calib_path="stereo_calibration.json"):
     for path_l, path_r in zip(images_left, images_right):
         yield os.path.basename(path_l), compute_depth_image(cv2.imread(path_l), cv2.imread(path_r), calib)
 
+def get_rectified_images(dataset_folder_path, calib_path="stereo_calibration.json"):
+    """Yield rectified pair for every pair in dataset_folder_path/left/*.png and dataset_folder_path/right/*.png."""
+    calib = load_calibration(calib_path)
+
+    images_left = sorted(glob.glob(f"{dataset_folder_path}/left/*.png"))
+    images_right = sorted(glob.glob(f"{dataset_folder_path}/right/*.png"))
+    assert images_left, f"No images found in {dataset_folder_path}/left"
+    assert len(images_left) == len(images_right), "left/ and right/ have different numbers of images"
+
+    for path_l, path_r in zip(images_left, images_right):
+        yield os.path.basename(path_l), compute_rectified_image(cv2.imread(path_l), cv2.imread(path_r), calib)
+
 
 def depth_to_color(depth, max_depth_mm=5000):
     """Colour-map a depth channel for viewing: near is red, far is blue, invalid is black."""
@@ -101,8 +125,8 @@ def depth_to_color(depth, max_depth_mm=5000):
 
 
 if __name__ == "__main__":
-    dataset_folder_path = "data/0_calib"
-    out_dir = "output/depth"
+    dataset_folder_path = "data/1_no_obstacle"
+    out_dir = "output/1_no_obstacle/depth"
     os.makedirs(out_dir, exist_ok=True)
 
     for name, rgbd in get_depth_images(dataset_folder_path):

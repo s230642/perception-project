@@ -3,10 +3,6 @@ import cv2
 from glob import glob
 import imutils
 
-#returns background of the dataset to compare and see if in the frame there is something moving like robot
-def build_background(dataset, camera='left'):
-    first_path = sorted(glob(f'{dataset}/{camera}/*.png'))[0]
-    return cv2.imread(first_path)
 
 #returns tuple left, right top corners and width, height of box
 def detect(frame, background, diff_threshold=100, min_area=100):
@@ -33,12 +29,10 @@ def detect(frame, background, diff_threshold=100, min_area=100):
     x, y, w, h = cv2.boundingRect(biggest)
     return (x, y, w, h)
 
-def detect_sequence(dataset_path):
-    background = build_background(dataset_path)
-    dataset = sorted(glob(f'{dataset_path}/left/*.png'))
+def detect_sequence(image_set):
+    background = image_set[0]
 
-    for image in dataset[1:]:
-        image = cv2.imread(image)
+    for image in image_set[1:]:
         output = image.copy()
         box = detect(image, background, diff_threshold=25, min_area=300)
 
@@ -55,11 +49,15 @@ def detect_sequence(dataset_path):
     
     cv2.destroyAllWindows()
 
+def detect_sequence3D(dataset_path):
+    print("This function is not yet implemented")
+
+
 #THIS IS ONLY USED FOR DEBUGGING THRESHOLD VALUE
 #plays the sequence with a trackbar to tune diff_threshold live
 def test_thresholds(dataset_path, start_threshold=25):
-    background = build_background(dataset_path)
     dataset = sorted(glob(f'{dataset_path}/left/*.png'))
+    background = cv2.imread(dataset[0])
 
     cv2.namedWindow("detections")
     cv2.createTrackbar("threshold", "detections", start_threshold, 255, lambda x: None)
