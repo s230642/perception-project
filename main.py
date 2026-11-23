@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np
 import cv2
 
-from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi
+from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman
 from getDepthImage import get_depth_images, get_rectified_images
 
 
@@ -39,6 +39,18 @@ def detect3D_roi(dataset_path, imagesAreRaw = True, calib_path="stereo_calibrati
 
     detect_sequence3D_roi(image_pairs, calib_path=calib_path)
 
+def detect3D_roi_WithKalman(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
+    """Detect the robot and compute its XYZ with a Kalman Filter on top, running SGBM only around the detected box each
+    frame instead of over the whole image first (see detect_robot.detect_sequence3D_roi)."""
+    assert imagesAreRaw, "detect3D_roi needs raw images -- it rectifies internally per detection"
+
+    lefts = sorted(glob(f"{dataset_path}/left/*.png"))
+    rights = sorted(glob(f"{dataset_path}/right/*.png"))
+    image_pairs = ((cv2.imread(l), cv2.imread(r)) for l, r in zip(lefts, rights))
+
+    detect_sequence3D_roi_WithKalman(image_pairs, calib_path=calib_path)
+
+
 def produce_rectified(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
     """Rectify the raw dataset and save the pairs to output/rectified/<dataset>/left and /right."""
     assert imagesAreRaw, "produce_rectified needs raw images"
@@ -68,6 +80,7 @@ TASKS = {
     "detect2D": detect2D,
     "detect3D": detect3D,
     "detect3D_roi": detect3D_roi,
+    "detect3D_roi_WithKalman": detect3D_roi_WithKalman,
 }
 
 
