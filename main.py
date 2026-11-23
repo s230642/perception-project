@@ -75,9 +75,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run one pipeline stage on one sequence.")
     parser.add_argument("--dataset", required=True, help="e.g. data/1_no_obstacle-2")
     parser.add_argument("--task", required=True, choices=TASKS.keys())
-    parser.add_argument("--rectified", action="store_true", help="images in dataset are already rectified")
+    parser.add_argument("--rectified", choices=["true", "false"], default="false",
+                        help="write true if the dataset images are already rectified, false if they are raw (default: false)")
     parser.add_argument("--calib", default="stereo_calibration.json", help="calibration JSON path")
 
     args = parser.parse_args()
 
-    TASKS[args.task](args.dataset, imagesAreRaw=not args.rectified, calib_path=args.calib)
+    TASKS[args.task](args.dataset, imagesAreRaw=args.rectified == "false", calib_path=args.calib)
