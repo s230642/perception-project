@@ -41,8 +41,10 @@ class Kalman3D():
         self.Q = q * np.kron(np.eye(3), [[1/4, 1/2],
                                          [1/2, 1  ]])
 
-    def update(self, measurement):
+    def update(self, measurement, variance=None):
         ### Insert update function
+        if variance is not None:
+            self.R = np.diag(variance)
         measurement = np.reshape(measurement, (3, 1))
         Y = measurement - self.H@self.state
         S = self.H @ self.P @ self.H.T + self.R

@@ -134,6 +134,22 @@ def depth_to_xyz(depth_region, u, v, calib, min_valid_frac=0.2):
     return X, Y, z
 
 
+def measurement_variance(xyz, calib, sigma_u=3.0, sigma_v=3.0, sigma_d=0.15):
+    """Variances (m^2) of a detected (X, Y, Z), for the Kalman filter's R. Depth noise grows with Z^2.
+
+    sigma_u, sigma_v: box-centre jitter in px. sigma_d: disparity error in px. The defaults were
+    fitted to the detections in data/3_curved_bend.
+    """
+    X, Y, Z = xyz
+    f = calib["focal_px"]
+    B = calib["baseline_mm"] / 1000.0
+
+    sigma_Z = Z**2 / (f * B) * sigma_d
+    var_X = (Z / f * sigma_u)**2 + (X / Z * sigma_Z)**2
+    var_Y = (Z / f * sigma_v)**2 + (Y / Z * sigma_Z)**2
+    return np.array([var_X, var_Y, sigma_Z**2])
+
+
 def box_to_xyz(depth, box, calib, min_valid_frac=0.2):
     """depth is a full-size depth map (mm); box=(x, y, w, h) is cropped out of it first."""
     x, y, w, h = box
