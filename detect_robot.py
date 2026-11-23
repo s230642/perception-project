@@ -2,6 +2,9 @@ import os
 import cv2
 from glob import glob
 import imutils
+import numpy as np
+
+from getDepthImage import compute_rectified_image, compute_depth_roi, depth_to_xyz, box_to_xyz, load_calibration
 
 
 #returns tuple left, right top corners and width, height of box
@@ -50,8 +53,71 @@ def detect_sequence(image_set):
     
     cv2.destroyAllWindows()
 
-def detect_sequence3D(dataset_path):
-    print("This function is not yet implemented")
+#works on whole rgbd pictures
+def detect_sequence3D(rgbd_frames, calib_path="stereo_calibration.json"):
+    calib = load_calibration(calib_path)
+
+    frames = iter(rgbd_frames)
+    background = cv2.cvtColor(next(frames)[:, :, :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
+
+    for rgbd in frames:
+        rgb = cv2.cvtColor(rgbd[:, :, :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
+        depth = rgbd[:, :, 3]
+        output = rgb.copy()
+
+        box = detect(rgb, background, diff_threshold=25, min_area=300)
+        if box is not None:
+            x, y, w, h = box
+            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 3)
+
+            xyz = box_to_xyz(depth, box, calib)
+            if xyz is None:
+                print(f"detected at {box} but depth is unreliable there")
+            else:
+                X, Y, Z = xyz
+                print(f"detected at {box}, X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+                cv2.putText(output, f"X={X:.2f} Y={Y:.2f} Z={Z:.2f} m", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        cv2.imshow("3D detections", output)
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+
+#it doesn't produce whole rgbd after detecting the robot we extract it from the picture and than calculate sgbm over this region
+#so it works faster and produces movei with higer fps rate
+def detect_sequence3D_roi(image_pairs, calib_path="stereo_calibration.json"):
+    calib = load_calibration(calib_path)
+
+    pairs = iter(image_pairs)
+    bg_l, bg_r = next(pairs)
+    background, _ = compute_rectified_image(bg_l, bg_r, calib)
+
+    for img_l, img_r in pairs:
+        rect_l, _ = compute_rectified_image(img_l, img_r, calib)
+        output = rect_l.copy()
+
+        box = detect(rect_l, background, diff_threshold=25, min_area=300)
+        if box is not None:
+            x, y, w, h = box
+            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 3)
+
+            depth_roi = compute_depth_roi(img_l, img_r, calib, box)
+            xyz = depth_to_xyz(depth_roi, x + w / 2, y + h / 2, calib)
+            if xyz is None:
+                print(f"detected at {box} but depth is unreliable there")
+            else:
+                X, Y, Z = xyz
+                print(f"detected at {box}, X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+                cv2.putText(output, f"X={X:.2f} Y={Y:.2f} Z={Z:.2f} m", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        cv2.imshow("3D detections (ROI)", output)
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
 
 
 #THIS IS ONLY USED FOR DEBUGGING THRESHOLD VALUE

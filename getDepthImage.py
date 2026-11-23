@@ -42,12 +42,17 @@ def load_calibration(calib_path):
         mode=cv2.STEREO_SGBM_MODE_SGBM_3WAY,
     )
 
+    # Rectified left camera matrix: fx == fy here, cx/cy is the image centre used for back-projection
+    P1 = mat("P1")
+
     return {
         "image_size": img_size,
         "map_l": map_l,
         "map_r": map_r,
         "focal_px": float(c["focal_px"]),
         "baseline_mm": float(c["baseline_mm"]),
+        "cx": float(P1[0, 2]),
+        "cy": float(P1[1, 2]),
         "matcher": matcher,
     }
 
@@ -67,6 +72,73 @@ def compute_rectified_image(img_left, img_right, calib):
     return rect_l, rect_r
 
 
+def compute_depth_roi(img_left, img_right, calib, roi):
+    """Run SGBM only around roi=(x, y, w, h) in rectified-image coordinates, instead of over the
+    whole frame -- much faster when depth is only needed for one already-detected region.
+
+    Returns an h x w float32 array of depth in mm, covering exactly the roi (0 where no valid
+    disparity was found, same convention as compute_depth_image).
+    """
+    rect_l, rect_r = compute_rectified_image(img_left, img_right, calib)
+
+    x, y, w, h = roi
+    num_disp = calib["matcher"].getNumDisparities()
+    block_pad = calib["matcher"].getBlockSize() // 2
+    pad = 10
+
+    # both crops must be the same size, and extend left by num_disp so the matcher has pixels
+    # to search for the roi's own columns -- cropping tightly to the roi would leave it with no
+    # search room and every pixel in it would come back invalid
+    desired_x0 = x - num_disp - pad
+    desired_x1 = x + w + pad
+    x0 = max(0, desired_x0)
+    x1 = min(rect_l.shape[1], desired_x1)
+
+    # a box near the left or right edge of the frame gets clamped on that side -- reclaim the
+    # lost margin on the other side, otherwise the crop can end up far narrower than num_disp
+    # and StereoSGBM miscalculates its internal buffer size instead of just rejecting the input
+    if x0 > desired_x0:
+        x1 = min(rect_l.shape[1], x1 + (x0 - desired_x0))
+    elif x1 < desired_x1:
+        x0 = max(0, x0 - (desired_x1 - x1))
+
+    y0 = max(0, y - block_pad)
+    y1 = min(rect_l.shape[0], y + h + block_pad)
+
+    crop_l = rect_l[y0:y1, x0:x1]
+    crop_r = rect_r[y0:y1, x0:x1]
+
+    disparity = calib["matcher"].compute(crop_l, crop_r).astype(np.float32) / 16.0
+    depth_crop = np.zeros_like(disparity)
+    valid = disparity > 0
+    depth_crop[valid] = calib["focal_px"] * calib["baseline_mm"] / disparity[valid]
+
+    # depth_crop is aligned to (x0, y0); slice out just the roi's own region
+    return depth_crop[y - y0:y - y0 + h, x - x0:x - x0 + w]
+
+
+def depth_to_xyz(depth_region, u, v, calib, min_valid_frac=0.2):
+    """Median of the valid pixels in depth_region (mm) back-projected to XYZ in metres.
+
+    (u, v) is the pixel position to use for X/Y -- pass the absolute rectified-image coordinates
+    of depth_region's centre, not a coordinate local to depth_region itself. Returns None if too
+    little of depth_region has a valid depth reading to trust.
+    """
+    valid = depth_region > 0
+    if valid.mean() < min_valid_frac:
+        return None
+
+    z = np.median(depth_region[valid]) / 1000.0  # mm -> m
+    X = (u - calib["cx"]) * z / calib["focal_px"]
+    Y = (v - calib["cy"]) * z / calib["focal_px"]
+    return X, Y, z
+
+
+def box_to_xyz(depth, box, calib, min_valid_frac=0.2):
+    """depth is a full-size depth map (mm); box=(x, y, w, h) is cropped out of it first."""
+    x, y, w, h = box
+    region = depth[y:y + h, x:x + w]
+    return depth_to_xyz(region, x + w / 2, y + h / 2, calib, min_valid_frac)
 
 
 def compute_depth_image(img_left, img_right, calib):
