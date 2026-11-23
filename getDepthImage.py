@@ -24,7 +24,7 @@ def load_calibration(calib_path):
     map_l = cv2.initUndistortRectifyMap(mat("K_left"), mat("D_left"), mat("R1"), mat("P1"), img_size, cv2.CV_32FC1)
     map_r = cv2.initUndistortRectifyMap(mat("K_right"), mat("D_right"), mat("R2"), mat("P2"), img_size, cv2.CV_32FC1)
 
-    # With f = 660 px and B = 50.6 mm, depth = f*B/d gives about 0.26 m at d = 128 px, so this
+    # With f = 660 px and B = 120.4 mm, depth = f*B/d gives about 0.62 m at d = 128 px, so this
     # search range covers everything farther away than that. Raise it (in steps of 16) for closer objects
     num_disparities = 128
     block_size = 5
