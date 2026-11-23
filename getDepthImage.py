@@ -125,13 +125,8 @@ def depth_to_color(depth, max_depth_mm=5000):
 
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     dataset_folder_path = "data/1_no_obstacle"
     out_dir = "output/1_no_obstacle/depth"
-=======
-    dataset = "data/0_calib/0_calib"
-    out_dir = "output/depth"
->>>>>>> dcdc89e (Added file for 3d, also changed square size in calibration to 80x80mm)
     os.makedirs(out_dir, exist_ok=True)
 
     for name, rgbd in get_depth_images(dataset_folder_path):

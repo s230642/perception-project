@@ -56,7 +56,6 @@ TASKS = {
     "produce_RGBD": produce_RGBD,
     "detect2D": detect2D,
     "detect3D": detect3D,
-
 }
 
 
