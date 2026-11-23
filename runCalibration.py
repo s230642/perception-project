@@ -3,7 +3,7 @@ import glob
 import json
 import numpy as np
 
-SQUARE_SIZE_MM = 33.6
+SQUARE_SIZE_MM = 80
 NB_VERTICAL = 7 
 NB_HORIZONTAL = 5 
 DATA_FOLDER = "data/0_calib"
