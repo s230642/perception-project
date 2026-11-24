@@ -133,7 +133,7 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
         rect_l, _ = compute_rectified_image(img_l, img_r, calib)
         output = rect_l.copy()
         ### UPDATE KALMAN ###
-        kf.predict()
+        xyz, uncertianty = kf.predict()
         #####################
         box = detect(rect_l, background, diff_threshold=25, min_area=300)
         if box is not None:
@@ -149,20 +149,25 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
                 ### UPDATE KALMAN ###
                 kxyz, kP = kf.update(xyz, measurement_variance(xyz, calib))
                 #####################
-                X, Y, Z = xyz
-                kX, kY, kZ = kxyz[0, 0], kxyz[2, 0], kxyz[4, 0]
+
                 print(f"Bounding box at {box}")
                 print(f"Detection at,    X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
-                print(f"Kalmanfilter at, X={kX:.2f} Y={kY:.2f} Z={kZ:.2f} m")
+        else:
+           #Branch for giving default box size
+            if w is None or h is None:  
+                w, h = 300, 300     
+        X, Y, Z = xyz
+        kX, kY, kZ = kxyz[0, 0], kxyz[2, 0], kxyz[4, 0]    
+        print(f"Kalmanfilter at, X={kX:.2f} Y={kY:.2f} Z={kZ:.2f} m")
 
-                u = calib["focal_px"] * kX / kZ + calib["cx"]
-                v = calib["focal_px"] * kY / kZ + calib["cy"]
-                # the state is the box CENTRE, so offset by half the size
-                cv2.putText(output, "The red box is detection. The green is Kalman.", (10, 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 5)
-                cv2.rectangle(output, (int(u - w / 2), int(v - h / 2)), (int(u + w / 2), int(v + h / 2)), (0, 255, 0), 3)
-                cv2.putText(output, f"X={kX:.2f} Y={kY:.2f} Z={kZ:.2f} m", (10, 60),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        u = calib["focal_px"] * kX / kZ + calib["cx"]
+        v = calib["focal_px"] * kY / kZ + calib["cy"]
+        # the state is the box CENTRE, so offset by half the size
+        cv2.putText(output, "The red box is detection. The green is Kalman.", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 5)
+        cv2.rectangle(output, (int(u - w / 2), int(v - h / 2)), (int(u + w / 2), int(v + h / 2)), (0, 255, 0), 3)
+        cv2.putText(output, f"X={kX:.2f} Y={kY:.2f} Z={kZ:.2f} m", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         cv2.imshow("3D detections (ROI), with Kalman ", output)
         if cv2.waitKey(30) & 0xFF == ord('q'):
