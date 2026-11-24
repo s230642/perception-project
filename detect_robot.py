@@ -128,8 +128,9 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
     pairs = iter(image_pairs)
     bg_l, bg_r = next(pairs)
     background, _ = compute_rectified_image(bg_l, bg_r, calib)
-    ref_wZ = ref_hZ = None
+    ref_wZ = ref_hZ = prev_w = None
     erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    n_small = 0
 
     for img_l, img_r in pairs:
         rect_l, _ = compute_rectified_image(img_l, img_r, calib)
@@ -149,8 +150,13 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
             if xyz is None:
                 print(f"detected at {box} but depth is unreliable there")
             elif ref_wZ and (w * xyz[2] < 0.8 * ref_wZ or h * xyz[2] < 0.8 * ref_hZ):
+                n_small = n_small + 1 if prev_w is not None and abs(w - prev_w) <= 3 else 0
+                if n_small >= 7:
+                    ref_wZ = ref_hZ = None
+                    n_small = 0
                 print("partial detection, skipping Kalman update")
             else:
+                n_small = 0
                 ### UPDATE KALMAN ###
                 kxyz, kP = kf.update(xyz, measurement_variance(xyz, calib))
                 #####################
@@ -161,6 +167,7 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
                 print(f"Bounding box at {box}")
                 print(f"Detection at,    X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
 
+        prev_w = box[2] if box is not None else None
         kX, kY, kZ = kxyz[0, 0], kxyz[2, 0], kxyz[4, 0]
         if kZ <= 0:
             # filter has no measurement yet (state starts at 0), nothing to project
