@@ -8,7 +8,7 @@ from getDepthImage import compute_rectified_image, compute_depth_roi, depth_to_x
 
 
 #returns tuple left, right top corners and width, height of box
-def detect(frame, background, diff_threshold=100, min_area=100):
+def detect(frame, background, diff_threshold=100, min_area=100, return_mask=False):
     diff = cv2.absdiff(frame, background)
 
     gray = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
@@ -26,11 +26,11 @@ def detect(frame, background, diff_threshold=100, min_area=100):
     cnts = [c for c in cnts if cv2.contourArea(c) > min_area]
 
     if len(cnts) < 1:
-        return None
+        return (None, mask) if return_mask else None
 
     biggest = max(cnts, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(biggest)
-    return (x, y, w, h)
+    box = cv2.boundingRect(biggest)
+    return (box, mask) if return_mask else box
 
 def detect_sequence(image_set):
     frames = iter(image_set)
@@ -129,6 +129,7 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
     bg_l, bg_r = next(pairs)
     background, _ = compute_rectified_image(bg_l, bg_r, calib)
     ref_wZ = ref_hZ = None
+    erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
 
     for img_l, img_r in pairs:
         rect_l, _ = compute_rectified_image(img_l, img_r, calib)
@@ -136,13 +137,14 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
         ### PREDICT KALMAN ###
         kxyz, kP = kf.predict()
         #####################
-        box = detect(rect_l, background, diff_threshold=25, min_area=300)
+        box, mask = detect(rect_l, background, diff_threshold=25, min_area=300, return_mask=True)
         if box is not None:
             x, y, w, h = box
             cv2.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 3)
 
             depth_roi = compute_depth_roi(img_l, img_r, calib, box)
-            xyz = depth_to_xyz(depth_roi, x + w / 2, y + h / 2, calib)
+            m = cv2.erode(mask, erode_kernel)[y:y + h, x:x + w] > 0
+            xyz = depth_to_xyz(depth_roi, x + w / 2, y + h / 2, calib, mask=m)
 
             if xyz is None:
                 print(f"detected at {box} but depth is unreliable there")

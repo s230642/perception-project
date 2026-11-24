@@ -117,15 +117,16 @@ def compute_depth_roi(img_left, img_right, calib, roi):
     return depth_crop[y - y0:y - y0 + h, x - x0:x - x0 + w]
 
 
-def depth_to_xyz(depth_region, u, v, calib, min_valid_frac=0.2):
+def depth_to_xyz(depth_region, u, v, calib, min_valid_frac=0.2, mask=None):
     """Median of the valid pixels in depth_region (mm) back-projected to XYZ in metres.
 
     (u, v) is the pixel position to use for X/Y -- pass the absolute rectified-image coordinates
     of depth_region's centre, not a coordinate local to depth_region itself. Returns None if too
     little of depth_region has a valid depth reading to trust.
     """
-    valid = depth_region > 0
-    if valid.mean() < min_valid_frac:
+    inside = np.ones(depth_region.shape, bool) if mask is None else mask
+    valid = (depth_region > 0) & inside
+    if not valid.any() or valid.sum() < min_valid_frac * inside.sum():
         return None
 
     z = np.median(depth_region[valid]) / 1000.0  # mm -> m
