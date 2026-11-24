@@ -128,8 +128,7 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
     pairs = iter(image_pairs)
     bg_l, bg_r = next(pairs)
     background, _ = compute_rectified_image(bg_l, bg_r, calib)
-    # default box size until the first detection; afterwards the last seen size is kept
-    w, h = 300, 300
+    ref_wZ = ref_hZ = None
 
     for img_l, img_r in pairs:
         rect_l, _ = compute_rectified_image(img_l, img_r, calib)
@@ -147,10 +146,14 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
 
             if xyz is None:
                 print(f"detected at {box} but depth is unreliable there")
+            elif ref_wZ and (w * xyz[2] < 0.8 * ref_wZ or h * xyz[2] < 0.8 * ref_hZ):
+                print("partial detection, skipping Kalman update")
             else:
                 ### UPDATE KALMAN ###
                 kxyz, kP = kf.update(xyz, measurement_variance(xyz, calib))
                 #####################
+                ref_wZ = w * xyz[2] if ref_wZ is None else 0.9 * ref_wZ + 0.1 * w * xyz[2]
+                ref_hZ = h * xyz[2] if ref_hZ is None else 0.9 * ref_hZ + 0.1 * h * xyz[2]
 
                 X, Y, Z = xyz
                 print(f"Bounding box at {box}")
@@ -167,6 +170,7 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
 
         u = calib["focal_px"] * kX / kZ + calib["cx"]
         v = calib["focal_px"] * kY / kZ + calib["cy"]
+        w, h = ref_wZ / kZ, ref_hZ / kZ
         # the state is the box CENTRE, so offset by half the size
         cv2.putText(output, "The red box is detection. The green is Kalman.", (10, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 5)
