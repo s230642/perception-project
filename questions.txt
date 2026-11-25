@@ -1,0 +1,2 @@
+1. Do we need to create point cloud from the all images, do we actually need to create any point cloud or just display
+how far robot is from the camera? -> 3D map with the movement

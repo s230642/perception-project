@@ -177,6 +177,13 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
             continue
         print(f"Kalmanfilter at, X={kX:.2f} Y={kY:.2f} Z={kZ:.2f} m")
 
+        if ref_wZ is None or ref_hZ is None:
+            # reference size was just reset and hasn't been reseeded by a detection yet
+            cv2.imshow("3D detections (ROI), with Kalman ", output)
+            if cv2.waitKey(30) & 0xFF == ord('q'):
+                break
+            continue
+
         u = calib["focal_px"] * kX / kZ + calib["cx"]
         v = calib["focal_px"] * kY / kZ + calib["cy"]
         w, h = ref_wZ / kZ, ref_hZ / kZ
