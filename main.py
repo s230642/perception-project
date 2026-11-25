@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np
 import cv2
 
-from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman
+from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman, detect_sequence_flow, detect_sequence3D_roi_WithKalman_flow
 from getDepthImage import get_depth_images, get_rectified_images
 
 
@@ -17,6 +17,17 @@ def detect2D(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.j
         lefts = (cv2.imread(p) for p in sorted(glob(f"{dataset_path}/left/*.png")))
 
     detect_sequence(lefts)
+
+def trackFlow(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
+    """Rectify the dataset first if needed, then track motion frame-to-frame via optical flow
+    instead of diffing against a fixed background (see detect_robot.detect_sequence_flow)."""
+
+    if imagesAreRaw:
+        lefts = (left for _, (left, _) in get_rectified_images(dataset_path, calib_path))
+    else:
+        lefts = (cv2.imread(p) for p in sorted(glob(f"{dataset_path}/left/*.png")))
+
+    detect_sequence_flow(lefts)
 
 def detect3D(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
     """Rectify the dataset first if needed, then run 3D detection on the rectified images."""
@@ -50,6 +61,17 @@ def detect3D_roi_WithKalman(dataset_path, imagesAreRaw = True, calib_path="stere
 
     detect_sequence3D_roi_WithKalman(image_pairs, calib_path=calib_path)
 
+def detect3D_roi_WithKalman_flow(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
+    """Same as detect3D_roi_WithKalman, but detects via sparse optical flow instead of
+    background-diff (see detect_robot.detect_sequence3D_roi_WithKalman_flow)."""
+    assert imagesAreRaw, "detect3D_roi_WithKalman_flow needs raw images -- it rectifies internally per detection"
+
+    lefts = sorted(glob(f"{dataset_path}/left/*.png"))
+    rights = sorted(glob(f"{dataset_path}/right/*.png"))
+    image_pairs = ((cv2.imread(l), cv2.imread(r)) for l, r in zip(lefts, rights))
+
+    detect_sequence3D_roi_WithKalman_flow(image_pairs, calib_path=calib_path)
+
 
 def produce_rectified(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
     """Rectify the raw dataset and save the pairs to output/rectified/<dataset>/left and /right."""
@@ -81,6 +103,8 @@ TASKS = {
     "detect3D": detect3D,
     "detect3D_roi": detect3D_roi,
     "detect3D_roi_WithKalman": detect3D_roi_WithKalman,
+    "detect3D_roi_WithKalman_flow": detect3D_roi_WithKalman_flow,
+    "trackFlow": trackFlow,
 }
 
 
