@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np
 import cv2
 
-from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman
+from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman, detect_sequence3D_roi_combined
 from getDepthImage import get_depth_images, get_rectified_images
 
 
@@ -38,6 +38,17 @@ def detect3D_roi(dataset_path, imagesAreRaw = True, calib_path="stereo_calibrati
     image_pairs = ((cv2.imread(l), cv2.imread(r)) for l, r in zip(lefts, rights))
 
     detect_sequence3D_roi(image_pairs, calib_path=calib_path)
+
+def detect3D_roi_combined(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
+    """Same as detect3D_roi, but detects via background-diff AND consecutive-frame-diff
+    agreement instead of plain background-diff (see detect_robot.detect_sequence3D_roi_combined)."""
+    assert imagesAreRaw, "detect3D_roi_combined needs raw images -- it rectifies internally per detection"
+
+    lefts = sorted(glob(f"{dataset_path}/left/*.png"))
+    rights = sorted(glob(f"{dataset_path}/right/*.png"))
+    image_pairs = ((cv2.imread(l), cv2.imread(r)) for l, r in zip(lefts, rights))
+
+    detect_sequence3D_roi_combined(image_pairs, calib_path=calib_path)
 
 def detect3D_roi_WithKalman(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
     """Detect the robot and compute its XYZ with a Kalman Filter on top, running SGBM only around the detected box each
@@ -80,6 +91,7 @@ TASKS = {
     "detect2D": detect2D,
     "detect3D": detect3D,
     "detect3D_roi": detect3D_roi,
+    "detect3D_roi_combined": detect3D_roi_combined,
     "detect3D_roi_WithKalman": detect3D_roi_WithKalman,
 }
 

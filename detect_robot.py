@@ -32,6 +32,71 @@ def detect(frame, background, diff_threshold=100, min_area=100, return_mask=Fals
     box = cv2.boundingRect(biggest)
     return (box, mask) if return_mask else box
 
+#same as detect, but uses the signed difference instead of absdiff, and keeps only pixels that
+#got darker than the background. Real occlusion (background replaced by the robot's own color)
+#consistently makes pixels darker, while e.g. a lighting-drift artifact on an unrelated static
+#object consistently makes pixels brighter -- thresholding only the "got darker" side rejects
+#that artifact instead of flagging it as foreground too, the way absdiff's unsigned magnitude does
+def detect_signed(frame, background, diff_threshold=25, min_area=100, return_mask=False):
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.int16)
+    bg_gray = cv2.cvtColor(background, cv2.COLOR_BGR2GRAY).astype(np.int16)
+    signed_diff = gray - bg_gray
+    mask = (signed_diff < -diff_threshold).astype(np.uint8) * 255
+
+    open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
+
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
+    mask[:200, :] = 0
+
+    cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = imutils.grab_contours(cnts)
+    cnts = [c for c in cnts if cv2.contourArea(c) > min_area]
+
+    if len(cnts) < 1:
+        return (None, mask) if return_mask else None
+
+    biggest = max(cnts, key=cv2.contourArea)
+    box = cv2.boundingRect(biggest)
+    return (box, mask) if return_mask else box
+
+#requires agreement between background-diff and consecutive-frame-diff. A region that only
+#differs from the fixed background (e.g. lighting drift on a static object) has no recent
+#frame-to-frame signal and gets dropped. A genuinely moving object's frame-to-frame signal is
+#just a thin edge (too sparse to threshold on its own for a slow-moving target), so it's dilated
+#first to confirm -- and keep -- the full, correctly-sized background-diff silhouette around it
+def detect_combined(frame, background, prev_frame, diff_threshold=25, min_area=300, dilate_k=21, return_mask=False):
+    bg_diff = cv2.absdiff(frame, background)
+    bg_gray = cv2.cvtColor(bg_diff, cv2.COLOR_BGR2GRAY)
+    _, bg_mask = cv2.threshold(bg_gray, diff_threshold, 255, cv2.THRESH_BINARY)
+
+    frame_diff = cv2.absdiff(frame, prev_frame)
+    frame_gray = cv2.cvtColor(frame_diff, cv2.COLOR_BGR2GRAY)
+    _, frame_mask = cv2.threshold(frame_gray, diff_threshold, 255, cv2.THRESH_BINARY)
+    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_k, dilate_k))
+    frame_mask = cv2.dilate(frame_mask, dilate_kernel)
+
+    mask = cv2.bitwise_and(bg_mask, frame_mask)
+
+    open_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, open_kernel, iterations=1)
+
+    close_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, close_kernel, iterations=2)
+    mask[:200, :] = 0
+
+    cnts = cv2.findContours(mask.copy(), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = imutils.grab_contours(cnts)
+    cnts = [c for c in cnts if cv2.contourArea(c) > min_area]
+
+    if len(cnts) < 1:
+        return (None, mask) if return_mask else None
+
+    biggest = max(cnts, key=cv2.contourArea)
+    box = cv2.boundingRect(biggest)
+    return (box, mask) if return_mask else box
+
 def detect_sequence(image_set):
     frames = iter(image_set)
     background = next(frames)
@@ -114,6 +179,42 @@ def detect_sequence3D_roi(image_pairs, calib_path="stereo_calibration.json"):
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
         cv2.imshow("3D detections (ROI)", output)
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+
+#same as detect_sequence3D_roi, but uses detect_combined (background-diff AND
+#consecutive-frame-diff) instead of plain background-diff
+def detect_sequence3D_roi_combined(image_pairs, calib_path="stereo_calibration.json"):
+    calib = load_calibration(calib_path)
+
+    pairs = iter(image_pairs)
+    bg_l, bg_r = next(pairs)
+    background, _ = compute_rectified_image(bg_l, bg_r, calib)
+    prev_rect_l = background
+
+    for img_l, img_r in pairs:
+        rect_l, _ = compute_rectified_image(img_l, img_r, calib)
+        output = rect_l.copy()
+
+        box = detect_combined(rect_l, background, prev_rect_l, diff_threshold=25, min_area=300)
+        prev_rect_l = rect_l
+        if box is not None:
+            x, y, w, h = box
+            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 3)
+
+            depth_roi = compute_depth_roi(img_l, img_r, calib, box)
+            xyz = depth_to_xyz(depth_roi, x + w / 2, y + h / 2, calib)
+            if xyz is None:
+                print(f"detected at {box} but depth is unreliable there")
+            else:
+                X, Y, Z = xyz
+                print(f"detected at {box}, X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+                cv2.putText(output, f"X={X:.2f} Y={Y:.2f} Z={Z:.2f} m", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        cv2.imshow("3D detections (ROI, combined)", output)
         if cv2.waitKey(30) & 0xFF == ord('q'):
             break
 
@@ -233,3 +334,7 @@ def test_thresholds(dataset_path, start_threshold=25):
             break
 
     cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    detect_sequence('data/3_curved_bend')
