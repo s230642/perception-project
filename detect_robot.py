@@ -3,7 +3,7 @@ import cv2
 from glob import glob
 import imutils
 import numpy as np
-from kalman import Kalman3D
+from kalman import Kalman3D, Kalman2D
 from getDepthImage import compute_rectified_image, compute_depth_roi, depth_to_xyz, box_to_xyz, load_calibration, measurement_variance
 
 
@@ -51,6 +51,99 @@ def detect_sequence(image_set):
         if cv2.waitKey(30) & 0xFF == ord('q'):
             break
     
+    cv2.destroyAllWindows()
+
+
+def _anchored_centre(lo, size, ref_size, pred_centre):
+    """Centre of a box that may be clipped (by an occluder or the image border) along one axis.
+
+    lo, size: measured start and length of the box on this axis. ref_size: the robot's full size.
+    A clipped box still has one TRUE edge -- the side away from the occluder -- so pick the edge
+    closer to where the filter predicts it and measure the centre from it plus half the full
+    size. Using the clipped box's own centre instead pulls the estimate back and slows it down.
+    """
+    hi = lo + size
+    if abs(lo - (pred_centre - ref_size / 2)) <= abs(hi - (pred_centre + ref_size / 2)):
+        return lo + ref_size / 2       # near edge visible, far side hidden
+    return hi - ref_size / 2           # far edge visible, near side hidden
+
+
+#2D tracking: same detector as detect_sequence, plus a constant-velocity Kalman filter on the
+#box centre in pixels. Needs only the left images (no SGBM), so it also works where stereo has no depth
+def detect_sequence_WithKalman(image_set, partial_ratio=0.9, min_visible=0.25):
+    kf = Kalman2D()
+
+    frames = iter(image_set)
+    background = next(frames)
+    ref_w = ref_h = prev_w = None
+    small_stable_streak = 0
+
+    for image in frames:
+        output = image.copy()
+        ### PREDICT KALMAN ###
+        kf.predict()
+        ######################
+        box = detect(image, background, diff_threshold=25, min_area=300)
+        if box is not None:
+            x, y, w, h = box
+            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 3)
+
+            # No depth here, so the partial-box test compares w and h directly instead of w*Z.
+            # Valid for the occlusions in sequence 2, where the distance to the camera is constant
+            partial = ref_w is not None and (w < partial_ratio * ref_w or h < partial_ratio * ref_h)
+
+            if not partial:
+                small_stable_streak = 0
+                ### UPDATE KALMAN ###
+                kf.update([x + w / 2, y + h / 2])
+                #####################
+                # Grow fast, shrink slowly: occlusions only ever make the box SMALLER, so a bigger
+                # box is real (robot fully in view / closer) -- e.g. the first detection is often
+                # clipped by the image border and the old 10% rate needed ~35 frames to catch up
+                if ref_w is None:
+                    ref_w, ref_h = w, h
+                else:
+                    ref_w = 0.5 * ref_w + 0.5 * w if w > ref_w else 0.9 * ref_w + 0.1 * w
+                    ref_h = 0.5 * ref_h + 0.5 * h if h > ref_h else 0.9 * ref_h + 0.1 * h
+                print(f"Bounding box at {box}, centre u={x + w / 2:.1f} v={y + h / 2:.1f} px")
+            else:
+                small_stable_streak = small_stable_streak + 1 if prev_w is not None and abs(w - prev_w) <= 3 else 0
+                if small_stable_streak >= 7:
+                    # the box has been smaller but stable for a while -> the robot really got smaller
+                    # (moved away), not occluded, so drop the reference size and re-seed it
+                    ref_w = ref_h = None
+                    small_stable_streak = 0
+                    print("box stayed small, resetting the reference size")
+                elif w >= min_visible * ref_w and h >= min_visible * ref_h:
+                    # Partially hidden: measure the centre from the robot's visible edge instead
+                    # of skipping the frame. Keeps the speed estimate right going into an
+                    # occlusion and re-locks as soon as the robot starts to reappear
+                    cu = _anchored_centre(x, w, ref_w, kf.state[0, 0]) if w < partial_ratio * ref_w else x + w / 2
+                    cv = _anchored_centre(y, h, ref_h, kf.state[2, 0]) if h < partial_ratio * ref_h else y + h / 2
+                    ### UPDATE KALMAN ###
+                    kf.update([cu, cv])
+                    #####################
+                    print(f"partial detection {box}, centre from visible edge u={cu:.1f} v={cv:.1f} px")
+                else:
+                    print("detection too small to trust, skipping Kalman update")
+
+        prev_w = box[2] if box is not None else None
+
+        if kf.initialized and ref_w is not None:
+            u, v = kf.state[0, 0], kf.state[2, 0]
+            print(f"Kalmanfilter at,  u={u:.1f} v={v:.1f} px")
+            # the state is the box CENTRE, so offset by half the size
+            cv2.putText(output, "The red box is detection. The green is Kalman.", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 5)
+            cv2.rectangle(output, (int(u - ref_w / 2), int(v - ref_h / 2)),
+                          (int(u + ref_w / 2), int(v + ref_h / 2)), (0, 255, 0), 3)
+            cv2.putText(output, f"u={u:.0f} v={v:.0f} px", (10, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        cv2.imshow("2D detections, with Kalman", output)
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
     cv2.destroyAllWindows()
 
 #works on whole rgbd pictures

@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np
 import cv2
 
-from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman
+from detect_robot import detect_sequence , detect_sequence_WithKalman, detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman
 from getDepthImage import get_depth_images, get_rectified_images
 
 
@@ -17,6 +17,16 @@ def detect2D(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.j
         lefts = (cv2.imread(p) for p in sorted(glob(f"{dataset_path}/left/*.png")))
 
     detect_sequence(lefts)
+
+def detect2D_WithKalman(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
+    """Same as detect2D, with a 2D (image-plane) Kalman Filter on top of the detections."""
+
+    if imagesAreRaw:
+        lefts = (left for _, (left, _) in get_rectified_images(dataset_path, calib_path))
+    else:
+        lefts = (cv2.imread(p) for p in sorted(glob(f"{dataset_path}/left/*.png")))
+
+    detect_sequence_WithKalman(lefts)
 
 def detect3D(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
     """Rectify the dataset first if needed, then run 3D detection on the rectified images."""
@@ -78,6 +88,7 @@ TASKS = {
     "produce_rectified": produce_rectified,
     "produce_RGBD": produce_RGBD,
     "detect2D": detect2D,
+    "detect2D_WithKalman": detect2D_WithKalman,
     "detect3D": detect3D,
     "detect3D_roi": detect3D_roi,
     "detect3D_roi_WithKalman": detect3D_roi_WithKalman,
