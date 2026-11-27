@@ -213,8 +213,7 @@ def detect_sequence3D_roi(image_pairs, calib_path="stereo_calibration.json"):
     cv2.destroyAllWindows()
 
 
-
-def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration.json"):
+def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration.json", partial_ratio=0.9, min_visible=0.25):
     calib = load_calibration(calib_path)
     kf = Kalman3D()
 
@@ -242,23 +241,63 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
 
             if xyz is None:
                 print(f"detected at {box} but depth is unreliable there")
-            elif ref_wZ and (w * xyz[2] < 0.8 * ref_wZ or h * xyz[2] < 0.8 * ref_hZ):
-                small_stable_streak = small_stable_streak + 1 if prev_w is not None and abs(w - prev_w) <= 3 else 0
-                if small_stable_streak >= 7:
-                    ref_wZ = ref_hZ = None
-                    small_stable_streak = 0
-                print("partial detection, skipping Kalman update")
             else:
-                small_stable_streak = 0
-                ### UPDATE KALMAN ###
-                kxyz, kP = kf.update(xyz, measurement_variance(xyz, calib))
-                #####################
-                ref_wZ = w * xyz[2] if ref_wZ is None else 0.9 * ref_wZ + 0.1 * w * xyz[2]
-                ref_hZ = h * xyz[2] if ref_hZ is None else 0.9 * ref_hZ + 0.1 * h * xyz[2]
+                # w*Z and h*Z are the robot's size independent of distance; compare with the reference.
+                # Use the filter's PREDICTED depth for this test once it has one: the measured depth of
+                # a half-hidden robot is unreliable (SGBM picks up background next to the occluder's
+                # edge), and a too-far Z makes a clipped box look full-size
+                Z_meas = xyz[2]
+                kZ = kf.state[4, 0]
+                Zs = kZ if kZ > 0 and ref_wZ is not None else xyz[2]
+                partial_w = ref_wZ is not None and w * Zs < partial_ratio * ref_wZ
+                partial_h = ref_hZ is not None and h * Zs < partial_ratio * ref_hZ
 
-                X, Y, Z = xyz
-                print(f"Bounding box at {box}")
-                print(f"Detection at,    X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+                if not (partial_w or partial_h):
+                    small_stable_streak = 0
+                    ### UPDATE KALMAN ###
+                    kxyz, kP = kf.update(xyz, measurement_variance(xyz, calib))
+                    #####################
+                    # Grow fast, shrink slowly: occlusions only ever make the box smaller
+                    Z = xyz[2]
+                    if ref_wZ is None:
+                        ref_wZ, ref_hZ = w * Z, h * Z
+                    else:
+                        ref_wZ = 0.5 * ref_wZ + 0.5 * w * Z if w * Z > ref_wZ else 0.9 * ref_wZ + 0.1 * w * Z
+                        ref_hZ = 0.5 * ref_hZ + 0.5 * h * Z if h * Z > ref_hZ else 0.9 * ref_hZ + 0.1 * h * Z
+
+                    # # Original reference-size update: 10% per frame, same rate up and down
+                    # ref_wZ = w * xyz[2] if ref_wZ is None else 0.9 * ref_wZ + 0.1 * w * xyz[2]
+                    # ref_hZ = h * xyz[2] if ref_hZ is None else 0.9 * ref_hZ + 0.1 * h * xyz[2]
+                    # X, Y, Z = xyz
+                    # print(f"Bounding box at {box}")
+                    # print(f"Detection at,    X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+                else:
+                    small_stable_streak = small_stable_streak + 1 if prev_w is not None and abs(w - prev_w) <= 3 else 0
+                    if small_stable_streak >= 7:
+                        ref_wZ = ref_hZ = None
+                        small_stable_streak = 0
+                        print("box stayed small, resetting the reference size")
+                    elif w * Zs >= min_visible * ref_wZ and h * Zs >= min_visible * ref_hZ:
+                        # Partially hidden: re-measure the centre from the robot's visible edge (same
+                        # as in 2D) and back-project it at the PREDICTED depth. The measured depth is
+                        # not trusted here, so Z gets a huge variance: this update corrects X and Y only
+                        full_w, full_h = ref_wZ / Zs, ref_hZ / Zs          # full size in px at this depth
+                        kX, kY = kf.state[0, 0], kf.state[2, 0]
+                        u_pred = calib["focal_px"] * kX / Zs + calib["cx"]
+                        v_pred = calib["focal_px"] * kY / Zs + calib["cy"]
+                        cu = _anchored_centre(x, w, full_w, u_pred) if partial_w else x + w / 2
+                        cv = _anchored_centre(y, h, full_h, v_pred) if partial_h else y + h / 2
+                        xyz = ((cu - calib["cx"]) * Zs / calib["focal_px"],
+                               (cv - calib["cy"]) * Zs / calib["focal_px"], Zs)
+                        var = measurement_variance(xyz, calib)
+                        var[2] = 1e6
+                        ### UPDATE KALMAN ###
+                        kxyz, kP = kf.update(xyz, var)
+                        #####################
+                        print(f"partial detection {box}, centre from visible edge: "
+                              f"X={xyz[0]:.2f} Y={xyz[1]:.2f} m (Z not used, measured {Z_meas:.2f} m)")
+                    else:
+                        print("detection too small to trust, skipping Kalman update")
 
         prev_w = box[2] if box is not None else None
         kX, kY, kZ = kxyz[0, 0], kxyz[2, 0], kxyz[4, 0]
@@ -326,3 +365,4 @@ def test_thresholds(dataset_path, start_threshold=25):
             break
 
     cv2.destroyAllWindows()
+
