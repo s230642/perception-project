@@ -32,7 +32,7 @@ def detect(frame, background, diff_threshold=100, min_area=100, return_mask=Fals
     box = cv2.boundingRect(biggest)
     return (box, mask) if return_mask else box
 
-def detect_sequence(image_set):
+def detect_sequence(image_set, background=None):
     frames = iter(image_set)
     background = next(frames)
 
@@ -70,11 +70,12 @@ def _anchored_centre(lo, size, ref_size, pred_centre):
 
 #2D tracking: same detector as detect_sequence, plus a constant-velocity Kalman filter on the
 #box centre in pixels. Needs only the left images (no SGBM), so it also works where stereo has no depth
-def detect_sequence_WithKalman(image_set, partial_ratio=0.9, min_visible=0.25):
+def detect_sequence_WithKalman(image_set, partial_ratio=0.9, min_visible=0.25, background=None):
     kf = Kalman2D()
 
     frames = iter(image_set)
-    background = next(frames)
+    if background is None:
+        background = next(frames)
     ref_w = ref_h = prev_w = None
     small_stable_streak = 0
 
@@ -147,12 +148,14 @@ def detect_sequence_WithKalman(image_set, partial_ratio=0.9, min_visible=0.25):
     cv2.destroyAllWindows()
 
 #works on whole rgbd pictures
-def detect_sequence3D(rgbd_frames, calib_path="stereo_calibration.json"):
+def detect_sequence3D(rgbd_frames, calib_path="stereo_calibration.json", background=None):
     calib = load_calibration(calib_path)
 
     frames = iter(rgbd_frames)
-    background = cv2.cvtColor(next(frames)[:, :, :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
+    # background = cv2.cvtColor(next(frames)[:, :, :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
 
+    if background is None:
+        background = cv2.cvtColor(next(frames)[:, :, :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
     for rgbd in frames:
         rgb = cv2.cvtColor(rgbd[:, :, :3].astype(np.uint8), cv2.COLOR_RGB2BGR)
         depth = rgbd[:, :, 3]
@@ -180,12 +183,16 @@ def detect_sequence3D(rgbd_frames, calib_path="stereo_calibration.json"):
 
 #it doesn't produce whole rgbd after detecting the robot we extract it from the picture and than calculate sgbm over this region
 #so it works faster and produces movei with higer fps rate
-def detect_sequence3D_roi(image_pairs, calib_path="stereo_calibration.json"):
+def detect_sequence3D_roi(image_pairs, calib_path="stereo_calibration.json", background=None):
     calib = load_calibration(calib_path)
 
     pairs = iter(image_pairs)
-    bg_l, bg_r = next(pairs)
-    background, _ = compute_rectified_image(bg_l, bg_r, calib)
+    # bg_l, bg_r = next(pairs)
+    # background, _ = compute_rectified_image(bg_l, bg_r, calib)
+
+    if background is None:
+        bg_l, bg_r = next(pairs)
+        background, _ = compute_rectified_image(bg_l, bg_r, calib)
 
     for img_l, img_r in pairs:
         rect_l, _ = compute_rectified_image(img_l, img_r, calib)
@@ -213,13 +220,16 @@ def detect_sequence3D_roi(image_pairs, calib_path="stereo_calibration.json"):
     cv2.destroyAllWindows()
 
 
-def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration.json", partial_ratio=0.9, min_visible=0.25):
+
+# def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration.json"):
+def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration.json", partial_ratio=0.9, min_visible=0.25, background=None):
     calib = load_calibration(calib_path)
     kf = Kalman3D()
 
     pairs = iter(image_pairs)
-    bg_l, bg_r = next(pairs)
-    background, _ = compute_rectified_image(bg_l, bg_r, calib)
+    if background is None:
+        bg_l, bg_r = next(pairs)
+        background, _ = compute_rectified_image(bg_l, bg_r, calib)
     ref_wZ = ref_hZ = prev_w = None
     erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     small_stable_streak = 0
@@ -265,12 +275,9 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
                         ref_wZ = 0.5 * ref_wZ + 0.5 * w * Z if w * Z > ref_wZ else 0.9 * ref_wZ + 0.1 * w * Z
                         ref_hZ = 0.5 * ref_hZ + 0.5 * h * Z if h * Z > ref_hZ else 0.9 * ref_hZ + 0.1 * h * Z
 
-                    # # Original reference-size update: 10% per frame, same rate up and down
-                    # ref_wZ = w * xyz[2] if ref_wZ is None else 0.9 * ref_wZ + 0.1 * w * xyz[2]
-                    # ref_hZ = h * xyz[2] if ref_hZ is None else 0.9 * ref_hZ + 0.1 * h * xyz[2]
-                    # X, Y, Z = xyz
-                    # print(f"Bounding box at {box}")
-                    # print(f"Detection at,    X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+                    X, Y, Z = xyz
+                    print(f"Bounding box at {box}")
+                    print(f"Detection at,    X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
                 else:
                     small_stable_streak = small_stable_streak + 1 if prev_w is not None and abs(w - prev_w) <= 3 else 0
                     if small_stable_streak >= 7:
@@ -365,4 +372,3 @@ def test_thresholds(dataset_path, start_threshold=25):
             break
 
     cv2.destroyAllWindows()
-

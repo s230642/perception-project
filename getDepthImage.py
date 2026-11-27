@@ -180,6 +180,38 @@ def compute_depth_image(img_left, img_right, calib):
     return np.dstack([rgb, depth])
 
 
+def _pick(n, max_frames):
+    """Indices of all n frames, or of max_frames of them spread evenly from first to last."""
+    if max_frames is None or max_frames >= n:
+        return range(n)
+    return np.unique(np.linspace(0, n - 1, max_frames).round().astype(int))
+
+def iter_image_pairs(dataset_path, max_frames=None):
+    """Yield (name, left BGR, right BGR) for every stereo pair in dataset_path/left and /right, in
+    frame order. max_frames: only yield that many pairs, spread evenly over the whole sequence."""
+    images_left = sorted(glob.glob(f"{dataset_path}/left/*.png"))
+    images_right = sorted(glob.glob(f"{dataset_path}/right/*.png"))
+    assert images_left, f"No images found in {dataset_path}/left"
+    assert len(images_left) == len(images_right), "left/ and right/ have different numbers of images"
+
+    for i in _pick(len(images_left), max_frames):
+        yield os.path.basename(images_left[i]), cv2.imread(images_left[i]), cv2.imread(images_right[i])
+        
+def median_background(dataset_path, calib_path="stereo_calibration.json", imagesAreRaw=True, max_frames=50):
+    """Background image = per-pixel median of max_frames rectified left frames spread over the sequence.
+
+    The robot keeps moving, so at every pixel most of the sampled frames show the empty scene and
+    the median picks that. Unlike using frame 0, this works when the robot is already visible at
+    the start (3_curved_bend): frame 0 as background leaves a "ghost" detection where it started.
+    Needs the whole sequence up front, so it is an offline method.
+    """
+    calib = load_calibration(calib_path) if imagesAreRaw else None
+    frames = []
+    for _, left, right in iter_image_pairs(dataset_path, max_frames=max_frames):
+        frames.append(compute_rectified_image(left, right, calib)[0] if imagesAreRaw else left)
+    return np.median(np.stack(frames), axis=0).astype(np.uint8)
+
+
 def get_depth_images(dataset_folder_path, calib_path="stereo_calibration.json"):
     """Yield (name, RGBD image) for every pair in dataset_folder_path/left/*.png and dataset_folder_path/right/*.png."""
     calib = load_calibration(calib_path)
