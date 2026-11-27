@@ -4,7 +4,7 @@ from glob import glob
 import numpy as np
 import cv2
 
-from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_WithKalman, detect_sequence3D_roi_combined
+from detect_robot import detect_sequence , detect_sequence3D, detect_sequence3D_roi, detect_sequence3D_roi_signed, detect_sequence3D_roi_WithKalman, detect_sequence3D_roi_WithKalman_signed, detect_sequence3D_roi_combined
 from getDepthImage import get_depth_images, get_rectified_images
 
 
@@ -39,6 +39,17 @@ def detect3D_roi(dataset_path, imagesAreRaw = True, calib_path="stereo_calibrati
 
     detect_sequence3D_roi(image_pairs, calib_path=calib_path)
 
+def detect3D_roi_signed(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
+    """Same as detect3D_roi, but detects via the signed background difference (keeps only pixels
+    that got darker than the background) instead of plain absdiff (see detect_robot.detect_signed)."""
+    assert imagesAreRaw, "detect3D_roi_signed needs raw images -- it rectifies internally per detection"
+
+    lefts = sorted(glob(f"{dataset_path}/left/*.png"))
+    rights = sorted(glob(f"{dataset_path}/right/*.png"))
+    image_pairs = ((cv2.imread(l), cv2.imread(r)) for l, r in zip(lefts, rights))
+
+    detect_sequence3D_roi_signed(image_pairs, calib_path=calib_path)
+
 def detect3D_roi_combined(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
     """Same as detect3D_roi, but detects via background-diff AND consecutive-frame-diff
     agreement instead of plain background-diff (see detect_robot.detect_sequence3D_roi_combined)."""
@@ -60,6 +71,18 @@ def detect3D_roi_WithKalman(dataset_path, imagesAreRaw = True, calib_path="stere
     image_pairs = ((cv2.imread(l), cv2.imread(r)) for l, r in zip(lefts, rights))
 
     detect_sequence3D_roi_WithKalman(image_pairs, calib_path=calib_path)
+
+def detect3D_roi_WithKalman_signed(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
+    """Same as detect3D_roi_WithKalman, but detects via the signed background difference (keeps
+    only pixels that got darker than the background) instead of plain absdiff
+    (see detect_robot.detect_sequence3D_roi_WithKalman_signed)."""
+    assert imagesAreRaw, "detect3D_roi_WithKalman_signed needs raw images -- it rectifies internally per detection"
+
+    lefts = sorted(glob(f"{dataset_path}/left/*.png"))
+    rights = sorted(glob(f"{dataset_path}/right/*.png"))
+    image_pairs = ((cv2.imread(l), cv2.imread(r)) for l, r in zip(lefts, rights))
+
+    detect_sequence3D_roi_WithKalman_signed(image_pairs, calib_path=calib_path)
 
 
 def produce_rectified(dataset_path, imagesAreRaw = True, calib_path="stereo_calibration.json"):
@@ -91,8 +114,10 @@ TASKS = {
     "detect2D": detect2D,
     "detect3D": detect3D,
     "detect3D_roi": detect3D_roi,
+    "detect3D_roi_signed": detect3D_roi_signed,
     "detect3D_roi_combined": detect3D_roi_combined,
     "detect3D_roi_WithKalman": detect3D_roi_WithKalman,
+    "detect3D_roi_WithKalman_signed": detect3D_roi_WithKalman_signed,
 }
 
 

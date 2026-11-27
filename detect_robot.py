@@ -184,6 +184,40 @@ def detect_sequence3D_roi(image_pairs, calib_path="stereo_calibration.json"):
 
     cv2.destroyAllWindows()
 
+#same as detect_sequence3D_roi, but uses detect_signed (keeps only pixels that got darker than
+#the background) instead of plain absdiff
+def detect_sequence3D_roi_signed(image_pairs, calib_path="stereo_calibration.json"):
+    calib = load_calibration(calib_path)
+
+    pairs = iter(image_pairs)
+    bg_l, bg_r = next(pairs)
+    background, _ = compute_rectified_image(bg_l, bg_r, calib)
+
+    for img_l, img_r in pairs:
+        rect_l, _ = compute_rectified_image(img_l, img_r, calib)
+        output = rect_l.copy()
+
+        box = detect_signed(rect_l, background, diff_threshold=25, min_area=300)
+        if box is not None:
+            x, y, w, h = box
+            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 3)
+
+            depth_roi = compute_depth_roi(img_l, img_r, calib, box)
+            xyz = depth_to_xyz(depth_roi, x + w / 2, y + h / 2, calib)
+            if xyz is None:
+                print(f"detected at {box} but depth is unreliable there")
+            else:
+                X, Y, Z = xyz
+                print(f"detected at {box}, X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+                cv2.putText(output, f"X={X:.2f} Y={Y:.2f} Z={Z:.2f} m", (10, 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        cv2.imshow("3D detections (ROI, signed)", output)
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
+
 #same as detect_sequence3D_roi, but uses detect_combined (background-diff AND
 #consecutive-frame-diff) instead of plain background-diff
 def detect_sequence3D_roi_combined(image_pairs, calib_path="stereo_calibration.json"):
@@ -261,8 +295,14 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
                 ### UPDATE KALMAN ###
                 kxyz, kP = kf.update(xyz, measurement_variance(xyz, calib))
                 #####################
-                ref_wZ = w * xyz[2] if ref_wZ is None else 0.9 * ref_wZ + 0.1 * w * xyz[2]
-                ref_hZ = h * xyz[2] if ref_hZ is None else 0.9 * ref_hZ + 0.1 * h * xyz[2]
+                # the reference only grows, never shrinks from an accepted detection -- a real
+                # object's depth-compensated size shouldn't shrink from legitimate distance
+                # changes, only from occlusion, so letting it erode let a slow partial-occlusion
+                # shrink (each step within the 0.8 gate of an already-eroded reference) drag the
+                # reference down with it, corrupting the velocity the filter coasts on once the
+                # target goes fully behind an obstacle
+                ref_wZ = w * xyz[2] if ref_wZ is None else max(ref_wZ, w * xyz[2])
+                ref_hZ = h * xyz[2] if ref_hZ is None else max(ref_hZ, h * xyz[2])
 
                 X, Y, Z = xyz
                 print(f"Bounding box at {box}")
@@ -299,7 +339,92 @@ def detect_sequence3D_roi_WithKalman(image_pairs, calib_path="stereo_calibration
         if cv2.waitKey(30) & 0xFF == ord('q'):
             break
 
-    cv2.destroyAllWindows()    
+    cv2.destroyAllWindows()
+
+#same as detect_sequence3D_roi_WithKalman, but uses detect_signed (keeps only pixels that got
+#darker than the background) instead of plain absdiff -- kept as a separate function so both
+#can still be compared
+def detect_sequence3D_roi_WithKalman_signed(image_pairs, calib_path="stereo_calibration.json"):
+    calib = load_calibration(calib_path)
+    kf = Kalman3D()
+
+    pairs = iter(image_pairs)
+    bg_l, bg_r = next(pairs)
+    background, _ = compute_rectified_image(bg_l, bg_r, calib)
+    ref_wZ = ref_hZ = prev_w = None
+    erode_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    small_stable_streak = 0
+
+    for img_l, img_r in pairs:
+        rect_l, _ = compute_rectified_image(img_l, img_r, calib)
+        output = rect_l.copy()
+        ### PREDICT KALMAN ###
+        kxyz, kP = kf.predict()
+        #####################
+        box, mask = detect_signed(rect_l, background, diff_threshold=25, min_area=300, return_mask=True)
+        if box is not None:
+            x, y, w, h = box
+            cv2.rectangle(output, (x, y), (x + w, y + h), (0, 0, 255), 3)
+
+            depth_roi = compute_depth_roi(img_l, img_r, calib, box)
+            m = cv2.erode(mask, erode_kernel)[y:y + h, x:x + w] > 0
+            xyz = depth_to_xyz(depth_roi, x + w / 2, y + h / 2, calib, mask=m)
+
+            if xyz is None:
+                print(f"detected at {box} but depth is unreliable there")
+            elif ref_wZ and (w * xyz[2] < 0.8 * ref_wZ or h * xyz[2] < 0.8 * ref_hZ):
+                small_stable_streak = small_stable_streak + 1 if prev_w is not None and abs(w - prev_w) <= 3 else 0
+                if small_stable_streak >= 7:
+                    ref_wZ = ref_hZ = None
+                    small_stable_streak = 0
+                print("partial detection, skipping Kalman update")
+            else:
+                small_stable_streak = 0
+                ### UPDATE KALMAN ###
+                kxyz, kP = kf.update(xyz, measurement_variance(xyz, calib))
+                #####################
+                # the reference only grows, never shrinks from an accepted detection -- see
+                # detect_sequence3D_roi_WithKalman for why (a real object's depth-compensated
+                # size shouldn't shrink from legitimate distance changes, only from occlusion)
+                ref_wZ = w * xyz[2] if ref_wZ is None else max(ref_wZ, w * xyz[2])
+                ref_hZ = h * xyz[2] if ref_hZ is None else max(ref_hZ, h * xyz[2])
+
+                X, Y, Z = xyz
+                print(f"Bounding box at {box}")
+                print(f"Detection at,    X={X:.2f} Y={Y:.2f} Z={Z:.2f} m")
+
+        prev_w = box[2] if box is not None else None
+        kX, kY, kZ = kxyz[0, 0], kxyz[2, 0], kxyz[4, 0]
+        if kZ <= 0:
+            # filter has no measurement yet (state starts at 0), nothing to project
+            cv2.imshow("3D detections (ROI), signed + Kalman", output)
+            if cv2.waitKey(30) & 0xFF == ord('q'):
+                break
+            continue
+        print(f"Kalmanfilter at, X={kX:.2f} Y={kY:.2f} Z={kZ:.2f} m")
+
+        if ref_wZ is None or ref_hZ is None:
+            # reference size was just reset and hasn't been reseeded by a detection yet
+            cv2.imshow("3D detections (ROI), signed + Kalman", output)
+            if cv2.waitKey(30) & 0xFF == ord('q'):
+                break
+            continue
+
+        u = calib["focal_px"] * kX / kZ + calib["cx"]
+        v = calib["focal_px"] * kY / kZ + calib["cy"]
+        w, h = ref_wZ / kZ, ref_hZ / kZ
+        # the state is the box CENTRE, so offset by half the size
+        cv2.putText(output, "The red box is detection. The green is Kalman.", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 5)
+        cv2.rectangle(output, (int(u - w / 2), int(v - h / 2)), (int(u + w / 2), int(v + h / 2)), (0, 255, 0), 3)
+        cv2.putText(output, f"X={kX:.2f} Y={kY:.2f} Z={kZ:.2f} m", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        cv2.imshow("3D detections (ROI), signed + Kalman", output)
+        if cv2.waitKey(30) & 0xFF == ord('q'):
+            break
+
+    cv2.destroyAllWindows()
 
 
 #THIS IS ONLY USED FOR DEBUGGING THRESHOLD VALUE
